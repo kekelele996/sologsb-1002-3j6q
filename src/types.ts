@@ -1,6 +1,7 @@
 export type Role = 'author' | 'reviewer' | 'editor'
 export type ParagraphStatus = 'open' | 'accepted' | 'locked'
-export type CommentStatus = 'open' | 'accepted' | 'rejected' | 'merged'
+// blocked：建议在批量合并时因引用冲突未能应用，仍待作者处理
+export type CommentStatus = 'open' | 'accepted' | 'rejected' | 'merged' | 'blocked'
 export type CommentType = 'comment' | 'suggestion'
 
 export interface Reply {
@@ -24,6 +25,10 @@ export interface Comment {
   replies: Reply[]
   createdAt: number
   mergedInto?: string
+  /** 建议提交时的段落原文快照，用于锚定引用与冲突排查 */
+  baseText?: string
+  /** status 为 blocked 时的冲突原因说明 */
+  blockReason?: string
 }
 
 export interface Paragraph {
@@ -57,4 +62,11 @@ export interface HistorySnapshot {
   paragraphs: Paragraph[]
   comments: Comment[]
   versions: Version[]
+}
+
+/** 一次批量处理建议的结果，供界面逐条反馈生效 / 待处理情况 */
+export interface SuggestionBatchOutcome {
+  accepted: Comment[]
+  rejected: Comment[]
+  blocked: { comment: Comment; reason: string }[]
 }

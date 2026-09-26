@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify": "esbuild src/utils/merge.ts --bundle --format=esm --outfile=node_modules/.cache/merge.mjs && esbuild src/store/review.ts --bundle --format=esm --outfile=node_modules/.cache/review-store.mjs && node scripts/verify-merge.mjs && node scripts/verify-store.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
