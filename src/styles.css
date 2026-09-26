@@ -61,6 +61,18 @@ button, input, textarea { font: inherit; }
 .comments-header h2 { margin: 0; color: #433a33; font-family: Georgia, "Songti SC", serif; font-size: 16px; }
 .comments-header p { margin: 4px 0 0; color: #96887d; font-size: 10px; }
 .comment-filters { padding: 10px 13px; }
+.batch-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 12px 9px; padding: 8px 10px; border: 1px solid #e7dccb; border-radius: 7px; background: #fbf6ee; font-size: 11px; color: #6d6156; }
+.batch-bar .batch-count { color: #8a7b6d; }
+.batch-bar .batch-tip { flex-basis: 100%; color: #a6988b; font-size: 10px; }
+.comment-card.conflicted { border-left: 3px solid #d48806; }
+.comment-select { margin-right: 5px; }
+.conflict-reason { margin-top: 8px; }
+.conflict-reason.ant-alert { padding: 6px 9px; font-size: 11px; }
+.conflict-reason .ant-alert-message { font-size: 11px; }
+.conflict-reason .ant-alert-description { margin-top: 2px; font-size: 10px; line-height: 1.5; }
+.base-text { margin-top: 7px; padding: 7px 9px; border: 1px solid #e8e1d7; border-radius: 6px; background: #f6f3ee; }
+.base-text small { color: #94877d; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+.base-text p { margin: 3px 0 0; color: #6f645a; font-family: Georgia, "Songti SC", serif; font-size: 10px; line-height: 1.6; }
 .comment-list { display: grid; gap: 9px; padding: 0 12px 50px; }
 .comment-card { border-color: #e2dbd3; background: #fffefa; box-shadow: 0 3px 12px rgba(64,53,43,.04); }
 .comment-card.accepted { border-left: 3px solid #3b8c67; }

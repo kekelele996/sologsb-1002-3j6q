@@ -1,6 +1,6 @@
 export type Role = 'author' | 'reviewer' | 'editor'
 export type ParagraphStatus = 'open' | 'accepted' | 'locked'
-export type CommentStatus = 'open' | 'accepted' | 'rejected' | 'merged'
+export type CommentStatus = 'open' | 'accepted' | 'rejected' | 'merged' | 'conflicted'
 export type CommentType = 'comment' | 'suggestion'
 
 export interface Reply {
@@ -20,10 +20,20 @@ export interface Comment {
   quote: string
   body: string
   suggestion?: string
+  /** 提交建议时的段落完整内容快照，合并时用于定位改动范围 */
+  baseText?: string
+  /** 合并冲突原因（status 为 conflicted 时存在） */
+  conflictReason?: string
   status: CommentStatus
   replies: Reply[]
   createdAt: number
   mergedInto?: string
+}
+
+export interface SuggestionApplyResult {
+  commentId: string
+  outcome: 'applied' | 'conflicted' | 'skipped'
+  reason?: string
 }
 
 export interface Paragraph {

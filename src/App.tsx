@@ -17,13 +17,20 @@ const roleMeta: Record<Role, { label: string; description: string; color: string
 }
 const roleIcon = (role: Role) => role === 'author' ? <FileDoneOutlined /> : role === 'reviewer' ? <CommentOutlined /> : <BranchesOutlined />
 const formatDate = (value: number) => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+const commentStatusMeta: Record<Comment['status'], { label: string; color: string }> = {
+  open: { label: '待处理', color: 'gold' },
+  conflicted: { label: '合并冲突', color: 'orange' },
+  accepted: { label: '已生效', color: 'green' },
+  rejected: { label: '已拒绝', color: 'red' },
+  merged: { label: '已合并', color: 'blue' },
+}
 
 export default function App() {
   const {
     role, paragraphs, comments, versions, selectedParagraphId, commentFilter, revisionMode, dirty, conflicts,
     setRole, selectParagraph, setCommentFilter, setRevisionMode, updateParagraph, addComment, replyComment,
-    resolveSuggestion, mergeComment, toggleLock, createVersion, addConflict, resolveConflict, dismissConflict,
-    undo, redo, save, resetDemo,
+    resolveSuggestion, applySuggestions, rejectSuggestions, mergeComment, toggleLock, createVersion, addConflict,
+    resolveConflict, dismissConflict, undo, redo, save, resetDemo,
   } = useReviewStore()
   const [composerOpen, setComposerOpen] = useState(false)
   const [commentType, setCommentType] = useState<CommentType>('comment')
@@ -31,6 +38,7 @@ export default function App() {
   const [suggestion, setSuggestion] = useState('')
   const [quote, setQuote] = useState('')
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  const [checkedSuggestionIds, setCheckedSuggestionIds] = useState<string[]>([])
   const [versionOpen, setVersionOpen] = useState(false)
   const [versionA, setVersionA] = useState(versions[1]?.id ?? versions[0]?.id)
   const [versionB, setVersionB] = useState(versions[0]?.id)
@@ -43,12 +51,24 @@ export default function App() {
     return acc
   }, {}), [comments])
   const duplicateParagraphIds = useMemo(() => new Set(Object.entries(paragraphCommentCounts).filter(([, count]) => count > 1).map(([id]) => id)), [paragraphCommentCounts])
+  const isPending = (comment: Comment) => comment.status === 'open' || comment.status === 'conflicted'
   const visibleComments = useMemo(() => comments.filter((comment) => {
-    if (commentFilter === 'open') return comment.status === 'open'
-    if (commentFilter === 'suggestion') return comment.type === 'suggestion' && comment.status === 'open'
-    if (commentFilter === 'duplicate') return duplicateParagraphIds.has(comment.paragraphId) && comment.status === 'open'
+    if (commentFilter === 'open') return isPending(comment)
+    if (commentFilter === 'suggestion') return comment.type === 'suggestion'
+    if (commentFilter === 'duplicate') return duplicateParagraphIds.has(comment.paragraphId) && isPending(comment)
     return true
   }).sort((a, b) => b.createdAt - a.createdAt), [commentFilter, comments, duplicateParagraphIds])
+  const pendingSuggestionsInView = useMemo(
+    () => visibleComments.filter((comment) => comment.type === 'suggestion' && isPending(comment)),
+    [visibleComments],
+  )
+  const pendingCount = useMemo(() => comments.filter(isPending).length, [comments])
+
+  // 已处理（生效/拒绝/合并）的建议自动移出勾选集合，保证保存重开后勾选状态不错乱
+  useEffect(() => {
+    setCheckedSuggestionIds((ids) => ids.filter((cid) =>
+      comments.some((comment) => comment.id === cid && comment.type === 'suggestion' && isPending(comment))))
+  }, [comments])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -116,6 +136,34 @@ export default function App() {
     else createVersion('')
     setVersionLabel('')
     message.success('当前版本已保存')
+  }
+  const reportBatchResults = (results: { outcome: string; reason?: string }[]) => {
+    const applied = results.filter((item) => item.outcome === 'applied').length
+    const conflicted = results.filter((item) => item.outcome === 'conflicted').length
+    if (applied > 0) message.success(`已按提交顺序合并 ${applied} 条建议`)
+    if (conflicted > 0) message.warning(`${conflicted} 条建议无法合并，冲突原因已标注在卡片上`)
+    if (applied === 0 && conflicted === 0) message.info('所选建议无需处理')
+    return conflicted
+  }
+  const handleApplyChecked = () => {
+    const results = applySuggestions(checkedSuggestionIds)
+    reportBatchResults(results)
+    setCheckedSuggestionIds([])
+  }
+  const handleRejectChecked = () => {
+    rejectSuggestions(checkedSuggestionIds)
+    setCheckedSuggestionIds([])
+    message.success('已拒绝所选建议')
+  }
+  const toggleChecked = (commentId: string, checked: boolean) => {
+    setCheckedSuggestionIds((ids) => checked ? [...ids, commentId] : ids.filter((id) => id !== commentId))
+  }
+  const handleResolveSingle = (commentId: string, accepted: boolean) => {
+    if (!accepted) { resolveSuggestion(commentId, false); return }
+    const results = resolveSuggestion(commentId, true)
+    const conflict = results.find((item) => item.outcome === 'conflicted')
+    if (conflict) message.warning(`无法合并：${conflict.reason}`)
+    else if (results.some((item) => item.outcome === 'applied')) message.success('建议已按引用位置合并到正文')
   }
   const comparedA = versions.find((version) => version.id === versionA)
   const comparedB = versions.find((version) => version.id === versionB)
@@ -239,22 +287,47 @@ export default function App() {
 
         <aside className="comments-panel">
           <div className="comments-header">
-            <div><h2><CommentOutlined /> 审阅意见 <Badge count={comments.filter((comment) => comment.status === 'open').length} /></h2><p>引用原文、讨论与修订建议</p></div>
+            <div><h2><CommentOutlined /> 审阅意见 <Badge count={pendingCount} /></h2><p>引用原文、讨论与修订建议</p></div>
           </div>
           <div className="comment-filters">
             <Radio.Group value={commentFilter} onChange={(event) => setCommentFilter(event.target.value)} buttonStyle="solid" size="small">
               <Radio.Button value="all">全部</Radio.Button><Radio.Button value="open">待处理</Radio.Button><Radio.Button value="suggestion">建议</Radio.Button><Radio.Button value="duplicate">重复</Radio.Button>
             </Radio.Group>
           </div>
+          {role === 'author' && (
+            <div className="batch-bar">
+              <Checkbox
+                checked={pendingSuggestionsInView.length > 0 && pendingSuggestionsInView.every((comment) => checkedSuggestionIds.includes(comment.id))}
+                indeterminate={pendingSuggestionsInView.some((comment) => checkedSuggestionIds.includes(comment.id)) && !pendingSuggestionsInView.every((comment) => checkedSuggestionIds.includes(comment.id))}
+                onChange={(event) => {
+                  const viewIds = pendingSuggestionsInView.map((comment) => comment.id)
+                  setCheckedSuggestionIds((ids) => event.target.checked
+                    ? Array.from(new Set([...ids, ...viewIds]))
+                    : ids.filter((id) => !viewIds.includes(id)))
+                }}
+              >全选当前建议</Checkbox>
+              <span className="batch-count">已选 {checkedSuggestionIds.length} 条</span>
+              <Button size="small" type="primary" icon={<CheckOutlined />} disabled={!checkedSuggestionIds.length} onClick={handleApplyChecked}>接受并合并</Button>
+              <Button size="small" danger icon={<CloseOutlined />} disabled={!checkedSuggestionIds.length} onClick={handleRejectChecked}>拒绝所选</Button>
+              <span className="batch-tip">按提交顺序逐条合并，冲突条目会停下并标注原因</span>
+            </div>
+          )}
           <div className="comment-list">
             {visibleComments.map((comment) => {
               const paragraph = paragraphs.find((item) => item.id === comment.paragraphId)
+              const selectable = role === 'author' && comment.type === 'suggestion' && isPending(comment)
+              const statusMeta = commentStatusMeta[comment.status]
               return (
-                <Card key={comment.id} size="small" className={`comment-card ${comment.status}`} title={<span>{comment.author} <Tag>{comment.type === 'suggestion' ? '修改建议' : '段落批注'}</Tag></span>} extra={<small>{formatDate(comment.createdAt)}</small>}>
+                <Card key={comment.id} size="small" className={`comment-card ${comment.status}`} title={<span>{selectable && <Checkbox className="comment-select" checked={checkedSuggestionIds.includes(comment.id)} onChange={(event) => toggleChecked(comment.id, event.target.checked)} />}{comment.author} <Tag>{comment.type === 'suggestion' ? '修改建议' : '段落批注'}</Tag><Tag color={statusMeta.color}>{statusMeta.label}</Tag></span>} extra={<small>{formatDate(comment.createdAt)}</small>}>
                   <button className="quote-line" onClick={() => paragraph && scrollToParagraph(paragraph.id)}>“{comment.quote}” · 段落 {paragraph?.number}</button>
                   <p className="comment-body">{comment.body}</p>
                   {comment.suggestion && <div className="suggestion-box"><small>建议改为</small><p>{comment.suggestion}</p></div>}
-                  {comment.status !== 'open' && <Tag color={comment.status === 'accepted' ? 'green' : comment.status === 'rejected' ? 'red' : 'blue'}>{comment.status === 'accepted' ? '已接受' : comment.status === 'rejected' ? '已拒绝' : '已合并'}</Tag>}
+                  {comment.type === 'suggestion' && comment.baseText && (
+                    <div className="base-text"><small>提交时段落（合并基准）</small><p>{comment.baseText}</p></div>
+                  )}
+                  {comment.status === 'conflicted' && (
+                    <Alert className="conflict-reason" type="warning" showIcon message="合并已暂停" description={comment.conflictReason ?? '建议与当前正文存在冲突'} />
+                  )}
                   <div className="replies">
                     {comment.replies.map((reply) => <div key={reply.id} className="reply"><b>{reply.author}</b><span>{reply.body}</span></div>)}
                   </div>
@@ -262,7 +335,7 @@ export default function App() {
                     <Input size="small" value={replyDrafts[comment.id] ?? ''} onChange={(event) => setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: event.target.value }))} placeholder="回复讨论…" onPressEnter={() => { const body = replyDrafts[comment.id]?.trim(); if (body) { replyComment(comment.id, body); setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: '' })) } }} />
                     <Button size="small" type="text" icon={<SendOutlined />} onClick={() => { const body = replyDrafts[comment.id]?.trim(); if (body) { replyComment(comment.id, body); setReplyDrafts((drafts) => ({ ...drafts, [comment.id]: '' })) } }} />
                   </div>
-                  {comment.status === 'open' && role === 'author' && comment.type === 'suggestion' && <div className="decision-row"><Button type="primary" size="small" icon={<CheckOutlined />} onClick={() => resolveSuggestion(comment.id, true)}>接受修改</Button><Button danger size="small" icon={<CloseOutlined />} onClick={() => resolveSuggestion(comment.id, false)}>拒绝</Button></div>}
+                  {selectable && <div className="decision-row"><Button type="primary" size="small" icon={<CheckOutlined />} onClick={() => handleResolveSingle(comment.id, true)}>{comment.status === 'conflicted' ? '重试合并' : '接受修改'}</Button><Button danger size="small" icon={<CloseOutlined />} onClick={() => handleResolveSingle(comment.id, false)}>拒绝</Button></div>}
                   {comment.status === 'open' && role === 'editor' && duplicateParagraphIds.has(comment.paragraphId) && (() => {
                     const sibling = comments.find((item) => item.id !== comment.id && item.paragraphId === comment.paragraphId && item.status === 'open')
                     return sibling ? <Button size="small" type="dashed" icon={<BranchesOutlined />} onClick={() => mergeComment(comment.id, sibling.id)}>合并到“{sibling.author}”意见</Button> : null
